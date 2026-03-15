@@ -4,44 +4,56 @@ pipeline {
     stages {
         stage('Setup') {
             steps {
-                sh '''
-                    python3 -m venv venv
-                    venv/bin/pip install --upgrade pip
-                    venv/bin/pip install -r requirements.txt
-                '''
+                dir('lab2') {
+                    sh '''
+                        python3 -m venv venv
+                        venv/bin/pip install --upgrade pip
+                        venv/bin/pip install -r requirements.txt
+                    '''
+                }
             }
         }
 
         stage('Data Creation') {
             steps {
-                sh 'venv/bin/python data_creation.py'
+                dir('lab2') {
+                    sh 'venv/bin/python data_creation.py'
+                }
             }
         }
 
         stage('Data Preprocessing') {
             steps {
-                sh 'venv/bin/python data_preprocessing.py'
+                dir('lab2') {
+                    sh 'venv/bin/python data_preprocessing.py'
+                }
             }
         }
 
         stage('Model Preparation') {
             steps {
-                sh 'venv/bin/python model_preparation.py'
+                dir('lab2') {
+                    sh 'venv/bin/python model_preparation.py'
+                }
             }
         }
 
         stage('Model Testing') {
             steps {
-                sh 'venv/bin/python model_testing.py'
+                dir('lab2') {
+                    sh 'venv/bin/python model_testing.py'
+                }
             }
         }
     }
 
     post {
         always {
-            echo 'Pipeline finished'
-            // Можно добавить очистку, например, удаление venv
-            // sh 'rm -rf venv'
+            dir('lab2') {
+                echo 'Pipeline finished in lab2'
+                // При необходимости можно добавить очистку:
+                // sh 'rm -rf venv'
+            }
         }
     }
 }
