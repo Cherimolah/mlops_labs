@@ -7,3 +7,4 @@ df["Age"] = df["Age"].fillna(mean_age)
 
 df.to_csv("data/titanic.csv", index=False)
 print(f"Средний возраст={mean_age}")
+#df.to_csv("data/filled.csv", index=False)

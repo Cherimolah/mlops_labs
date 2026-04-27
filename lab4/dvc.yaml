@@ -1,0 +1,23 @@
+stages:
+  load:
+    cmd: python make_v1.py
+    deps:
+      - make_v1.py
+    outs:
+      - data/raw.csv
+
+  fillna:
+    cmd: python make_v2.py
+    deps:
+      - make_v2.py
+      - data/raw.csv
+    outs:
+      - data/filled.csv
+
+  onehot:
+    cmd: python make_v3.py
+    deps:
+      - make_v3.py
+      - data/filled.csv
+    outs:
+      - data/final.csv
