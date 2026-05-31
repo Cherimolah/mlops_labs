@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Оценка стоимости квартиры</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <span>🏠</span>
+  <h1>Оценка стоимости квартиры — Москва</h1>
+</header>
+
+<div class="container">
+  <div class="card">
+    <form id="predict-form">
+      <div class="form-grid">
+        <div>
+          <label>Общая площадь (м²)</label>
+          <input type="number" name="full_sq" step="0.1" min="1" max="1000" placeholder="например, 55.0" required>
+        </div>
+        <div>
+          <label>Жилая площадь (м²)</label>
+          <input type="number" name="life_sq" step="0.1" min="1" max="1000" placeholder="например, 35.0" required>
+        </div>
+        <div>
+          <label>Площадь кухни (м²)</label>
+          <input type="number" name="kitch_sq" step="0.1" min="1" max="200" placeholder="например, 9.0" required>
+        </div>
+        <div>
+          <label>Количество комнат</label>
+          <input type="number" name="num_room" min="1" max="19" placeholder="1–10" required>
+        </div>
+        <div>
+          <label>Этаж</label>
+          <input type="number" name="floor" min="1" max="77" placeholder="например, 5" required>
+        </div>
+        <div>
+          <label>Этажность дома</label>
+          <input type="number" name="max_floor" min="1" max="77" placeholder="например, 9" required>
+        </div>
+        <div>
+          <label>Год постройки</label>
+          <input type="number" name="build_year" min="1900" max="2030" placeholder="например, 2005" required>
+        </div>
+        <div>
+          <label>Район</label>
+          <select name="sub_area" required>
+            <option value="" disabled selected>Выберите район</option>
+            {% for d in districts %}
+            <option value="{{ d }}">{{ d }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <button type="submit" class="btn" id="submit-btn">
+        Рассчитать цену
+        <span class="spinner" id="spinner"></span>
+      </button>
+    </form>
+
+    <div class="error-box" id="error-box"></div>
+
+    <div class="result-box" id="result-box">
+      <div class="label">Оценочная стоимость квартиры</div>
+      <div class="price" id="result-price"></div>
+    </div>
+  </div>
+
+  <!-- History -->
+  <div class="history-section">
+    <h2>История предсказаний (сессия)</h2>
+    {% if history %}
+    <div class="batch-table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Время</th><th>Пл. общ.</th><th>Пл. жил.</th><th>Этаж</th>
+            <th>Этажей</th><th>Год</th><th>Комнат</th><th>Район</th><th>Цена</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for h in history %}
+          <tr>
+            <td>{{ h.timestamp }}</td>
+            <td>{{ h.full_sq }} м²</td>
+            <td>{{ h.life_sq }} м²</td>
+            <td>{{ h.floor }}</td>
+            <td>{{ h.max_floor }}</td>
+            <td>{{ h.build_year }}</td>
+            <td>{{ h.num_room }}</td>
+            <td>{{ h.sub_area }}</td>
+            <td class="price-cell">{{ h.price_formatted }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="history-empty">Предсказаний пока нет. Введите параметры квартиры выше.</p>
+    {% endif %}
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

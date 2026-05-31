@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+models/*.joblib
+.env
+.chat_log.md
