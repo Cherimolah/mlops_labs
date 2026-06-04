@@ -1,4 +1,8 @@
+import json
 import os
+import shutil
+from datetime import datetime
+
 import pandas as pd
 import joblib
 from sklearn.ensemble import GradientBoostingRegressor
@@ -7,8 +11,10 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, r2_score
 
 DATA_PATH = os.path.join(os.path.dirname(__file__), "data", "train.csv")
+REFERENCE_PATH = os.path.join(os.path.dirname(__file__), "data", "reference.csv")
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "apartment_model.joblib")
 ENCODER_PATH = os.path.join(os.path.dirname(__file__), "models", "district_encoder.joblib")
+METRICS_PATH = os.path.join(os.path.dirname(__file__), "models", "metrics.json")
 
 FEATURES = ["full_sq", "life_sq", "floor", "max_floor", "build_year",
             "num_room", "kitch_sq", "sub_area_enc"]
@@ -48,6 +54,22 @@ def train():
     joblib.dump(le, ENCODER_PATH)
     print(f"Model saved: {MODEL_PATH}")
     print(f"Encoder saved: {ENCODER_PATH}")
+
+    # Сохраняем метрики обучения.
+    metrics = {
+        "mae": round(float(mae), 2),
+        "r2": round(float(r2), 4),
+        "rows": int(len(df)),
+        "trained_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    with open(METRICS_PATH, "w", encoding="utf-8") as f:
+        json.dump(metrics, f, ensure_ascii=False, indent=2)
+    print(f"Metrics saved: {METRICS_PATH}")
+
+    # Фиксируем эталонный снапшот данных: именно с ним drift_detection.py
+    # будет сравнивать свежие данные, чтобы понять, что распределение сдвинулось.
+    shutil.copyfile(DATA_PATH, REFERENCE_PATH)
+    print(f"Reference snapshot saved: {REFERENCE_PATH}")
 
 
 if __name__ == "__main__":

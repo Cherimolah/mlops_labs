@@ -5,3 +5,9 @@ __pycache__/
 models/*.joblib
 .env
 .chat_log.md
+
+# Артефакты пайплайна обновления данных
+data/_raw/
+RETRAIN_REQUIRED
+drift_report.json
+.kaggle/

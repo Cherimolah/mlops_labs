@@ -37,8 +37,13 @@
 ├── models/
 │   ├── apartment_model.joblib    # сериализованная модель (генерируется train.py)
 │   └── district_encoder.joblib  # LabelEncoder для районов
-├── train.py               # обучение модели и сохранение артефактов
+├── scripts/
+│   ├── download_data.py   # скачивание датасета mlurfuflat с Kaggle
+│   └── drift_detection.py # метрики сдвига данных (PSI / KS / Jensen-Shannon)
+├── train.py               # обучение модели + сохранение эталона и метрик
+├── Jenkinsfile            # ежедневный пайплайн: данные -> дрейф -> переобучение
 ├── requirements.txt
+├── requirements-pipeline.txt  # доп. зависимости пайплайна (kaggle, scipy)
 ├── Dockerfile
 └── .gitignore
 ```
@@ -162,6 +167,62 @@ docker run -p 8000:8000 apartment-predictor
 
 Когда команда подготовит реальный датасет — достаточно заменить `data/sample.csv` и перезапустить `python train.py`.
 
+
+---
+
+## Пайплайн данных и переобучение (MLOps)
+
+Датасет берётся из соревнования Kaggle [mlurfuflat](https://www.kaggle.com/competitions/mlurfuflat).
+Ежедневный Jenkins-пайплайн поддерживает модель в актуальном состоянии и
+переобучает её **только при сдвиге данных** (data drift).
+
+### 1. Скачивание данных
+
+```bash
+python scripts/download_data.py
+```
+
+Авторизация в Kaggle — через переменные окружения `KAGGLE_USERNAME` / `KAGGLE_KEY`
+(или файл `~/.kaggle/kaggle.json`). Скрипт качает соревнование, находит обучающий
+файл и нормализует его в `data/train.csv`.
+
+### 2. Детекция сдвига данных
+
+```bash
+python scripts/drift_detection.py
+```
+
+Свежий `data/train.csv` сравнивается с эталоном `data/reference.csv` (срез данных,
+на котором обучена текущая модель — сохраняется в `train.py`). Считаются метрики:
+
+| Метрика | Что показывает | Порог |
+|---------|----------------|-------|
+| **PSI** (Population Stability Index) | насколько сдвинулось распределение признака/таргета | <0.1 стабильно · 0.1–0.25 умеренно · >0.25 значимо |
+| **KS-тест** (Колмогоров–Смирнов) | статистическая значимость различия распределений | p-value < 0.05 — значимо |
+| **Jensen–Shannon distance** | расхождение распределения цены `price_doc` | 0 (совпадают) … 1 |
+
+**Переобучение запускается, если** PSI таргета > 0.2, **или** хотя бы у одного
+признака PSI > 0.25, **или** не менее половины признаков имеют PSI > 0.1.
+
+Результат: человекочитаемый `drift_report.json`; при сдвиге создаётся файл-маркер
+`RETRAIN_REQUIRED`. Код возврата: `0` — сдвига нет, `10` — сдвиг, `1` — ошибка.
+
+### 3. Jenkins (раз в день)
+
+`Jenkinsfile` описывает пайплайн с триггером `cron('H 3 * * *')`:
+
+1. **Setup** — venv + установка `requirements.txt` и `requirements-pipeline.txt`.
+2. **Download data** — `scripts/download_data.py`.
+3. **Detect drift** — `scripts/drift_detection.py`.
+4. **Retrain** — `train.py` (выполняется только при наличии `RETRAIN_REQUIRED`).
+5. **Publish model** — архивирование `models/*.joblib`, `metrics.json`, `reference.csv`.
+
+Нужен Jenkins-credential типа *Username with password* с id **`kaggle-api`**
+(username = Kaggle username, password = Kaggle API key). `drift_report.json`
+архивируется в каждом запуске.
+
+> Реальный датасет на Kaggle меняется редко, поэтому переобучение в норме не
+> срабатывает — пайплайн демонстрирует механику автообновления и реакции на дрейф.
 
 ---
 

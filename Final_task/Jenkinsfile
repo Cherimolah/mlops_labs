@@ -1,0 +1,121 @@
+// Jenkins-пайплайн ежедневного автообновления датасета и переобучения при сдвиге данных.
+//
+// Логика:
+//   1. Раз в сутки (cron) скачиваем свежий датасет с Kaggle (mlurfuflat).
+//   2. Считаем метрики дрейфа (PSI / KS / Jensen-Shannon) относительно эталона.
+//   3. Если обнаружен сдвиг данных — переобучаем модель и публикуем артефакты.
+//   4. Если сдвига нет — модель не трогаем.
+//
+// Требуется Jenkins-credential типа "Username with password" с id 'kaggle-api':
+//   username = ваш Kaggle username, password = Kaggle API key.
+
+pipeline {
+    agent any
+
+    triggers {
+        // Раз в день, Jenkins сам разнесёт нагрузку по времени (H).
+        cron('H 3 * * *')
+    }
+
+    environment {
+        KAGGLE = credentials('kaggle-api')      // -> KAGGLE_USR / KAGGLE_PSW
+        KAGGLE_USERNAME = "${KAGGLE_USR}"
+        KAGGLE_KEY = "${KAGGLE_PSW}"
+        PYTHON = 'python'
+    }
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+    }
+
+    stages {
+        stage('Setup') {
+            steps {
+                script {
+                    runCmd("${PYTHON} -m venv .venv")
+                    def py = pyBin()
+                    runCmd("${py} -m pip install --upgrade pip")
+                    runCmd("${py} -m pip install -r requirements.txt -r requirements-pipeline.txt")
+                }
+            }
+        }
+
+        stage('Download data') {
+            steps {
+                script {
+                    runCmd("${pyBin()} scripts/download_data.py")
+                }
+            }
+        }
+
+        stage('Detect drift') {
+            steps {
+                script {
+                    // drift_detection.py: код 0 — дрейфа нет, 10 — дрейф, 1 — ошибка.
+                    def status = runCmdStatus("${pyBin()} scripts/drift_detection.py")
+                    if (status == 1) {
+                        error('Ошибка при расчёте дрейфа данных')
+                    }
+                    env.DRIFT_DETECTED = fileExists('RETRAIN_REQUIRED') ? 'true' : 'false'
+                    echo "Сдвиг данных обнаружен: ${env.DRIFT_DETECTED}"
+                }
+            }
+        }
+
+        stage('Retrain') {
+            when { expression { env.DRIFT_DETECTED == 'true' } }
+            steps {
+                script {
+                    echo 'Обнаружен сдвиг данных — переобучаю модель.'
+                    runCmd("${pyBin()} train.py")
+                }
+            }
+        }
+
+        stage('Publish model') {
+            when { expression { env.DRIFT_DETECTED == 'true' } }
+            steps {
+                archiveArtifacts artifacts: 'models/*.joblib, models/metrics.json, data/reference.csv',
+                                 fingerprint: true
+                // Здесь же можно пересобрать и задеплоить Docker-образ, например:
+                //   runCmd('docker build -t apartment-predictor:latest .')
+            }
+        }
+    }
+
+    post {
+        always {
+            archiveArtifacts artifacts: 'drift_report.json', allowEmptyArchive: true
+        }
+        success {
+            echo "Готово. Переобучение: ${env.DRIFT_DETECTED}"
+        }
+        failure {
+            echo 'Пайплайн упал — см. лог выше.'
+        }
+    }
+}
+
+// --- Кросс-платформенные помощники (Linux/Windows агенты Jenkins) ---
+
+def pyBin() {
+    return isUnix() ? '.venv/bin/python' : '.venv\\Scripts\\python'
+}
+
+def runCmd(String cmd) {
+    if (isUnix()) {
+        sh cmd
+    } else {
+        bat cmd
+    }
+}
+
+// Запуск с возвратом кода выхода (для drift_detection.py).
+def runCmdStatus(String cmd) {
+    if (isUnix()) {
+        return sh(script: cmd, returnStatus: true)
+    } else {
+        return bat(script: cmd, returnStatus: true)
+    }
+}
