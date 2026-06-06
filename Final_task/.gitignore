@@ -1,13 +1,36 @@
-.venv/
+й# ---- Python ----
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
-models/*.joblib
-.env
-.chat_log.md
+.venv/
+*.egg-info/
+dist/
+build/
 
-# Артефакты пайплайна обновления данных
+# ---- Данные (версионируются через DVC) ----
+# ВАЖНО: не удаляй соответствующие *.dvc-файлы — они и есть версия в Git.
+data/train.csv
+data/reference.csv
 data/_raw/
+
+# ---- Модели (артефакты сборки Jenkins) ----
+models/apartment_model.joblib
+models/district_encoder.joblib
+
+# ---- DVC runtime ----
+.dvc/tmp/
+.dvc/cache/
+.dvc/runs/
+
+# ---- Временные файлы пайплайна ----
 RETRAIN_REQUIRED
 drift_report.json
-.kaggle/
+
+# ---- IDE ----
+.idea/
+.vscode/
+*.swp
+
+# ---- OS ----
+.DS_Store
+Thumbs.db

@@ -8,3 +8,5 @@ joblib==1.4.2
 numpy==1.26.4
 kaggle>=1.6
 scipy>=1.11
+dvc>=3.50
+dvc-s3>=3.2
