@@ -1,0 +1,16 @@
+# Контекст сборки Docker. Уменьшает образ и ускоряет `docker build` в CI.
+# ВАЖНО: data/train.csv НЕ исключаем — он нужен Dockerfile (RUN python train.py).
+.git
+.dvc/cache
+.dvc/tmp
+.venv
+__pycache__
+*.py[cod]
+.pytest_cache
+tests
+*.md
+drift_report.json
+RETRAIN_REQUIRED
+.idea
+.vscode
+.DS_Store

@@ -1,0 +1,172 @@
+// Jenkinsfile.ci — CI/CD-пайплайн приложения (отдельная Pipeline-job в Jenkins).
+//
+// Запускается на каждое изменение в репозитории (push / poll SCM), в отличие от
+// основного Jenkinsfile, который по cron раз в сутки обновляет данные и
+// переобучает модель. Здесь решаются три задачи проекта:
+//
+//   1) Оркестрация через CI/CD (Jenkins)              — этот пайплайн.
+//   2) В конвейере запускаются И модульные тесты,     — стадии 'Unit tests'
+//      И тесты на качество данных.                       и 'Data quality tests'.
+//   3) Приложение собирается в Docker-образ           — стадия 'Build Docker image'
+//      прямо в конвейере.                                (+ дымовой тест образа).
+//
+// Требуемые Jenkins-credentials:
+//   'aws-s3-dvc' — Username with password (username = ACCESS_KEY_ID,
+//                  password = SECRET_ACCESS_KEY) для скачивания данных из DVC-remote.
+//                  Эндпойнт S3-совместимого хранилища (Beget/MinIO/др.) задаётся
+//                  параметром S3_ENDPOINT_URL и применяется через
+//                  `dvc remote modify --local` (не трогает закоммиченный .dvc/config).
+
+pipeline {
+    agent any
+
+    triggers {
+        // Запуск по изменениям в SCM (если нет вебхука — опрос раз в 5 минут).
+        pollSCM('H/5 * * * *')
+    }
+
+    parameters {
+        string(name: 'IMAGE_NAME', defaultValue: 'apartment-predictor',
+               description: 'Имя собираемого Docker-образа')
+        string(name: 'S3_ENDPOINT_URL', defaultValue: 'https://s3.ru1.storage.beget.cloud',
+               description: 'Endpoint S3-совместимого DVC-remote (пусто для AWS S3)')
+    }
+
+    environment {
+        // DVC remote (S3-совместимое хранилище).
+        AWS                   = credentials('aws-s3-dvc')   // -> AWS_USR / AWS_PSW
+        AWS_ACCESS_KEY_ID     = "${AWS_USR}"
+        AWS_SECRET_ACCESS_KEY = "${AWS_PSW}"
+        AWS_DEFAULT_REGION    = 'ru-1'
+
+        PYTHON     = 'python'
+        IMAGE_TAG  = "${params.IMAGE_NAME}:${env.BUILD_NUMBER}"
+        IMAGE_LATEST = "${params.IMAGE_NAME}:latest"
+    }
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+    }
+
+    stages {
+
+        stage('Setup') {
+            steps {
+                script {
+                    runCmd("${PYTHON} -m venv .venv")
+                    def py = pyBin()
+                    runCmd("${py} -m pip install --upgrade pip")
+                    runCmd("${py} -m pip install -r requirements.txt -r requirements-pipeline.txt -r requirements-test.txt")
+                }
+            }
+        }
+
+        stage('DVC pull') {
+            // Нужны актуальные данные: и для тестов качества данных,
+            // и для сборки образа (Dockerfile выполняет `python train.py`).
+            steps {
+                script {
+                    if (params.S3_ENDPOINT_URL?.trim()) {
+                        // Локальная (не коммитимая) настройка эндпойнта.
+                        runCmdStatus("dvc remote modify --local myremote endpointurl ${params.S3_ENDPOINT_URL}")
+                    }
+                    def rc = runCmdStatus("${pyBin()} scripts/dvc_push.py pull")
+                    if (rc != 0) {
+                        error('DVC pull не удался — нет данных для тестов качества и сборки образа')
+                    }
+                }
+            }
+        }
+
+        stage('Unit tests') {
+            steps {
+                script {
+                    // Все тесты, КРОМЕ помеченных data_quality.
+                    def rc = runCmdStatus(
+                        "${pyBin()} -m pytest tests -m \"not data_quality\" " +
+                        "--junitxml=reports/unit-tests.xml")
+                    if (rc != 0) { error('Модульные тесты не прошли') }
+                }
+            }
+        }
+
+        stage('Data quality tests') {
+            steps {
+                script {
+                    // Только тесты качества данных (train.csv / reference.csv).
+                    def rc = runCmdStatus(
+                        "${pyBin()} -m pytest tests -m \"data_quality\" " +
+                        "--junitxml=reports/data-quality-tests.xml")
+                    if (rc != 0) { error('Тесты качества данных не прошли — данные не соответствуют контракту') }
+                }
+            }
+        }
+
+        stage('Build Docker image') {
+            steps {
+                script {
+                    // Сборка образа в конвейере. Dockerfile внутри обучает модель
+                    // (RUN python train.py) на данных, скачанных стадией DVC pull.
+                    runCmd("docker build -t ${env.IMAGE_TAG} -t ${env.IMAGE_LATEST} .")
+                }
+            }
+        }
+
+        stage('Smoke test image') {
+            steps {
+                script {
+                    // Поднимаем контейнер и проверяем /health, затем гасим.
+                    def name = "apt-smoke-${env.BUILD_NUMBER}"
+                    runCmd("docker run -d --rm --name ${name} -p 18000:8000 ${env.IMAGE_TAG}")
+                    def rc = runCmdStatus(
+                        "for i in \$(seq 1 30); do " +
+                        "curl -fsS http://localhost:18000/health && exit 0; sleep 2; done; exit 1")
+                    runCmdStatus("docker stop ${name}")
+                    if (rc != 0) { error('Дымовой тест образа не прошёл: /health недоступен') }
+                }
+            }
+        }
+
+        // stage('Push image') {   // включите при наличии registry-credentials
+        //     steps {
+        //         script {
+        //             docker.withRegistry('https://registry.example.com', 'registry-creds') {
+        //                 runCmd("docker push ${env.IMAGE_TAG}")
+        //                 runCmd("docker push ${env.IMAGE_LATEST}")
+        //             }
+        //         }
+        //     }
+        // }
+    }
+
+    post {
+        always {
+            junit allowEmptyResults: true, testResults: 'reports/*.xml'
+        }
+        success {
+            echo "CI пройден. Собран образ: ${env.IMAGE_TAG}"
+        }
+        failure {
+            echo 'CI упал — см. лог выше.'
+        }
+    }
+}
+
+// --- Кросс-платформенные помощники (как в основном Jenkinsfile) ---
+
+def pyBin() {
+    return isUnix() ? '.venv/bin/python' : '.venv\\Scripts\\python'
+}
+
+def runCmd(String cmd) {
+    if (isUnix()) { sh cmd } else { bat cmd }
+}
+
+def runCmdStatus(String cmd) {
+    if (isUnix()) {
+        return sh(script: cmd, returnStatus: true)
+    } else {
+        return bat(script: cmd, returnStatus: true)
+    }
+}
